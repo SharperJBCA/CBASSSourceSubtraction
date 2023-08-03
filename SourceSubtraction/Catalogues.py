@@ -4,6 +4,7 @@ import os
 import h5py
 from dataclasses import dataclass, field
 from astropy.io import fits
+from matplotlib import pyplot
 
 #set_num_threads(2)
 
@@ -24,7 +25,7 @@ class Catalogue:
     glat : np.ndarray = field(default_factory=lambda : np.zeros(1))
     flux : np.ndarray = field(default_factory=lambda : np.zeros(1))
     eflux: np.ndarray = field(default_factory=lambda : np.zeros(1))
-    galactic_flag : np.ndarray = field(default_factory=lambda : np.zeros(1,dtype=bool))
+    flag : np.ndarray = field(default_factory=lambda : np.zeros(1,dtype=bool))
 
     def __add__(self,other):
         """Add two catalogues together"""
@@ -34,15 +35,61 @@ class Catalogue:
         new.glat = np.concatenate([self.glat,other.glat])
         new.flux = np.concatenate([self.flux,other.flux])
         new.eflux = np.concatenate([self.eflux,other.eflux])
-        new.galactic_flag = np.concatenate([self.galactic_flag,other.galactic_flag])
+        new.flag = np.concatenate([self.flag,other.flag])
         return new
+    
+    def __repr__(self) -> str:
+        s = f'Catalogue: {self.name}\n'
+        s += f'Number of sources: {self.size}\n'
+        s += f'Flagged sources: {self.flag.sum()}\n'
+        return s
+        
+    def __call__(self,fitsfile):
+        self.run(fitsfile)
+        self.clean_nan() 
+        self.remove_flagged()
+
+    def clean_nan(self):
+        mask = np.isnan(self.glon) | np.isnan(self.glat) | np.isnan(self.flux) | np.isnan(self.eflux) | (self.flux <= 0)
+        self.glon = self.glon[~mask]
+        self.glat = self.glat[~mask]
+        self.flux = self.flux[~mask]
+        self.eflux = self.eflux[~mask]
+        self.flag = self.flag[~mask]
+
+    def remove_flagged(self):
+        """Remove flagged sources from catalogue"""
+        mask = self.flag == False
+        self.glon = self.glon[mask]
+        self.glat = self.glat[mask]
+        self.flux = self.flux[mask]
+        self.eflux = self.eflux[mask]
+        self.flag = self.flag[mask]
+
+    def run(self,fitsfile):
+        pass
 
     @property 
     def size(self):
         return len(self.glon)
     
-    def __call__(self,fitsfile):
-        pass 
+    @property
+    def thetaphi(self):
+        print(np.nanmin(self.glat),np.nanmax(self.glat))
+        return (90-self.glat)*np.pi/180., self.glon*np.pi/180.
+
+    def remove_sources(self,mask):
+        """Remove sources from catalogue"""
+        self.glon = self.glon[mask]
+        self.glat = self.glat[mask]
+        self.flux = self.flux[mask]
+        self.eflux = self.eflux[mask]
+        self.flag = self.flag[mask]
+
+    def update_sources(self,mask,flux,eflux):
+        """Update fluxes of sources"""
+        self.flux[mask] = flux
+        self.eflux[mask] = eflux
 
     def write_file(self,filename):
         """Write to HDF5 file"""
@@ -55,7 +102,7 @@ class Catalogue:
         grp.create_dataset('GLAT',data=self.glat)
         grp.create_dataset('FLUX',data=self.flux)
         grp.create_dataset('eFLUX',data=self.eflux)
-        grp.create_dataset('GALACTIC_FLAG',data=self.galactic_flag)
+        grp.create_dataset('FLAG',data=self.flag)
         h.close() 
 
     def load_file(self,filename, name='none'):
@@ -66,7 +113,7 @@ class Catalogue:
         self.glat = grp['GLAT'][...]
         self.flux = grp['FLUX'][...]
         self.eflux = grp['eFLUX'][...]
-        self.galactic_flag = grp['GALACTIC_FLAG'][...]
+        self.flag = grp['FLAG'][...]
         h.close()
 
 @dataclass 
@@ -74,22 +121,72 @@ class Mingaliev(Catalogue):
 
     name : str = 'Mingaliev'
 
-    def __call__(self,fitsfile):
+    def run(self,fitsfile):
 
         hdu = fits.open(fitsfile,memmap=False)
         data = hdu[1].data
-        print(hdu[1].columns)
 
         self.glon = data['_Glon']
         self.glat = data['_Glat']
-        s3flux = data['S3_9']*(3.9/4.76)**data['Sp-Index']
-        s7flux = data['S7_7']*(7.7/4.76)**data['Sp-Index']
-        es3flux = data['e_S3_9']*(3.9/4.76)**data['Sp-Index']
-        es7flux = data['e_S7_7']*(7.7/4.76)**data['Sp-Index']
-        self.flux = (s3flux/es3flux**2+s7flux/es7flux**2)/(1./es3flux**2+1./es7flux**2)
+        
+        self.flux = data['S3_9GHz']*(3.9/4.76)**data['Sp-Index']
+        self.eflux = data['e_S3_9GHz']*(3.9/4.76)**data['Sp-Index']
+        self.flag = np.zeros_like(self.glon,dtype=bool)
+        hdu.close()
+
+@dataclass 
+class GB6(Catalogue):
+
+    name : str = 'GB6'
+
+    def run(self,fitsfile):
+
+        hdu = fits.open(fitsfile,memmap=False)
+        data = hdu[1].data
+        self.glon = data['_Glon']
+        self.glat = data['_Glat']
+        
+        self.flux = data['Flux']*1e-3
+        self.eflux = data['e_Flux']*1e-3
+
+        self.flag = np.array([True if (data['Eflag'][i] == 'E') else False for i in range(len(data['Eflag']))])
 
         hdu.close()
 
+@dataclass 
+class PMN(Catalogue):
+
+    name : str = 'PMN'
+
+    def run(self,fitsfile):
+
+        hdu = fits.open(fitsfile,memmap=False)
+        data = hdu[1].data
+        self.glon = data['_Glon']
+        self.glat = data['_Glat']
+        
+        self.flux = data['Flux']*1e-3
+        self.eflux = data['e_Flux']*1e-3
+        self.flag = np.array([True if (data['Xflag'][i] == 'X') else False for i in range(len(data['Xflag']))])
+        hdu.close()
+
+@dataclass
+class CBASS(Catalogue):
+
+    name : str = 'CBASS'
+
+    def run(self,fitsfile):
+
+        data = np.loadtxt(fitsfile,skiprows=1,usecols=[3,4,7,8])
+        self.glon = data[:,0]
+        self.glat = data[:,1]
+        self.flux = data[:,2]*0.7
+        self.eflux = data[:,3]
+        rot = hp.rotator.Rotator(coord=['C','G'])
+        self.glat, self.glon = rot(*self.thetaphi) 
+        self.glon = np.mod(self.glon*180/np.pi,360)
+        self.glat = (np.pi/2.-self.glat)*180/np.pi
+        self.flag = np.zeros_like(self.glon,dtype=bool)
 
 def mingaliev(filename):
     """
@@ -180,7 +277,7 @@ def PCCS(filename):
     columns = {k:np.array(v) for k,v in columns.items()}
     return columns
 
-def GB6(filename):
+def gb6(filename):
     """
     """
     columns = {'GLON':[],
@@ -221,7 +318,7 @@ def GB6(filename):
         columns = {k:np.array(v) for k,v in columns.items()}
         return columns
 
-def PMN(filename):
+def pmn(filename):
     """
     """
     columns = {

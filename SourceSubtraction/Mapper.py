@@ -6,7 +6,45 @@ import os
 import healpy as hp
 import h5py
 
-def AlmSpace(Catalogue, nside=1024, lside=256,lmax=None,
+def pixel_space(flux, glon, glat, nside=1024, lside=256,lmax=None,
+             cutoff=None, fwhm=1, skymask=None, write_out=False,
+             frequency=4.76,beam_model=None,verbose=False,
+             use_corr_flux=False):
+    """
+    Bins sources into map in pixel-space.
+
+    Returns:
+    Source map, mask, source_fluxes, source_lons, source_lats
+    """
+
+    kb = 1.3806503e-23
+    c = 2.99792458e8
+    nu = frequency*1e9
+    beam_solid_angle = 1.133 * (np.pi/180.)**2
+    pixel_solid_angle = 4*np.pi/(12*nside**2)
+    calfactor = 2 * kb * (nu/c)**2 * 1e26 * pixel_solid_angle
+    if isinstance(lmax, type(None)):
+        lmax = 3*lside
+
+    if not isinstance(beam_model, type(None)):
+        dtheta = np.abs(beam_model[0,0]-beam_model[1,0])*np.pi/180.
+        beam_solid_angle = 2*np.pi*np.sum(beam_model[:,1]*np.sin(beam_model[:,0]*np.pi/180.))*dtheta
+        bl = hp.beam2bl(beam_model[:,1],beam_model[:,0]*np.pi/180.,lmax)
+    if not isinstance(fwhm, type(None)):
+        bl = hp.gauss_beam(fwhm*np.pi/180.,lmax)
+
+    pixels = hp.ang2pix(nside, np.pi/2-glat*np.pi/180., glon*np.pi/180.)
+    pixel_edges = np.arange(hp.nside2npix(nside)+1)
+    sum_map = np.histogram(pixels, bins=pixel_edges, weights=flux)[0] # Jy/beam
+
+    # Apply beam here:
+    alm = hp.map2alm(sum_map)
+    alm = hp.almxfl(alm,bl)
+    sum_map = hp.alm2map(alm,nside)
+
+    return sum_map / calfactor 
+
+def alm_space(flux, glon, glat, nside=1024, lside=256,lmax=None,
              cutoff=None, fwhm=1, skymask=None, write_out=False,
              frequency=4.76,beam_model=None,verbose=False,
              use_corr_flux=False):
@@ -42,14 +80,14 @@ def AlmSpace(Catalogue, nside=1024, lside=256,lmax=None,
 
     if use_corr_flux:
         h = h5py.File('AncillaryData/FluxCorrections.hdf5','r')
-        sourceInfo = np.array([Catalogue['GLON']*np.pi/180.,
-                               (90-Catalogue['GLAT'])*np.pi/180.,
-                               Catalogue['FLUX']*h['flux_corrections'][:]]).T
+        sourceInfo = np.array([glon*np.pi/180.,
+                               (90-glat)*np.pi/180.,
+                               flux*h['flux_corrections'][:]]).T
         h.close()
     else:
-        sourceInfo = np.array([Catalogue['GLON']*np.pi/180.,
-                               (90-Catalogue['GLAT'])*np.pi/180.,
-                               Catalogue['FLUX']]).T
+        sourceInfo = np.array([glon*np.pi/180.,
+                               (90-glat)*np.pi/180.,
+                               flux]).T
 
     d_alms = gsl_funcs.precomp_harmonics(sourceInfo,idx.size,np.max(l))
     if verbose:
