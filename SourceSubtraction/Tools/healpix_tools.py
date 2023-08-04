@@ -454,7 +454,7 @@ class Mollview:
 
         return self.img 
     
-    def contourf(self, m,vmin=None,vmax=None,cmap=None,interpolation='nearest'):
+    def contourf(self, m,levels=[0.5,1],vmin=None,vmax=None,cmap=None,interpolation='nearest'):
         array, footprint = reproject_from_healpix((m,'galactic'), self.wcs,
                                                   shape_out=[self.Ny,self.Nx],
                                                   nested=False,order=self.interpolation)
@@ -462,9 +462,9 @@ class Mollview:
         axes_contour = pyplot.subplot(111,projection=self.wcs,frame_class=EllipticalFrame)
 
         
-        contourf = axes_contour.contourf(array,levels=[0,1],cmap=cmap,vmin=vmin,vmax=vmax,alpha=0.5)
+        contourf = axes_contour.contourf(array,levels=levels,cmap=cmap,vmin=vmin,vmax=vmax,alpha=0.5)
         array[np.isnan(array)] = 0
-        contour = axes_contour.contour(array,colors='k',levels=[0,1],vmin=vmin,vmax=vmax,linewidths=0.5)
+        contour = axes_contour.contour(array,colors='k',levels=levels,vmin=vmin,vmax=vmax,linewidths=0.5)
         return contourf 
 
     def norm(self, array, vmin, vmax, norm):

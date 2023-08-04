@@ -91,6 +91,23 @@ class Catalogue:
         self.flux[mask] = flux
         self.eflux[mask] = eflux
 
+    def mask_map(self, mask_map):
+        """Mask the map"""
+        theta, phi = self.thetaphi
+        pixels = hp.ang2pix(hp.npix2nside(mask_map.size),theta,phi)
+        mask = mask_map[pixels]
+        self.remove_sources(mask)
+
+    def mask_declinations(self,declination_min=-10,declination_max=90):
+
+        theta,phi = self.thetaphi
+        rot = hp.rotator.Rotator(coord=['G','C'])
+        theta,phi = rot(theta,phi)
+
+        dec = 90 - theta*180/np.pi
+        mask = (dec > declination_min) & (dec < declination_max)
+        self.remove_sources(mask)
+
     def write_file(self,filename):
         """Write to HDF5 file"""
         if not os.path.exists(os.path.dirname(filename)):
@@ -180,12 +197,12 @@ class CBASS(Catalogue):
         data = np.loadtxt(fitsfile,skiprows=1,usecols=[3,4,7,8])
         self.glon = data[:,0]
         self.glat = data[:,1]
-        self.flux = data[:,2]*0.7
+        self.flux = data[:,2]
         self.eflux = data[:,3]
-        rot = hp.rotator.Rotator(coord=['C','G'])
-        self.glat, self.glon = rot(*self.thetaphi) 
-        self.glon = np.mod(self.glon*180/np.pi,360)
-        self.glat = (np.pi/2.-self.glat)*180/np.pi
+        # rot = hp.rotator.Rotator(coord=['C','G'])
+        # self.glat, self.glon = rot(*self.thetaphi) 
+        # self.glon = np.mod(self.glon*180/np.pi,360)
+        # self.glat = (np.pi/2.-self.glat)*180/np.pi
         self.flag = np.zeros_like(self.glon,dtype=bool)
 
 def mingaliev(filename):

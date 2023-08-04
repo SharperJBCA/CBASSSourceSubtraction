@@ -1,3 +1,5 @@
+import matplotlib 
+matplotlib.use('Agg')
 import numpy as np
 import sys
 
@@ -9,6 +11,7 @@ import h5py
 import healpy as hp
 from matplotlib import pyplot
 from tqdm import tqdm 
+
 
 def haversine(theta1, phi1, theta2, phi2):
     """
@@ -98,14 +101,18 @@ def main():
     """
     """
 
+    mask_map = ~hp.read_map('../Masks/scripts/masks/CBASS_80pc_G_1024.fits').astype(bool) 
+
+
     defaults = ''
     nside = 1024
     fwhm = 1 
     beam_model_filename = 'AncillaryData/cbass_beam2_nodupes.txt'
 
     cbass = Catalogues.CBASS()
-    cbass('AncillaryData/Catalogues/cbassNorth_sourceCat_v1.0.txt')
+    cbass('AncillaryData/Catalogues/cbassNorth_sourceCat_v1.3.txt')
     cbass.remove_sources(cbass.flux > 1)
+    cbass.mask_declinations(declination_min=-5,declination_max=90)
 
     mingaliev = Catalogues.Mingaliev()
     mingaliev('AncillaryData/Catalogues/mingaliev2001_RATAN600.fits')
@@ -113,15 +120,18 @@ def main():
     gb6('AncillaryData/Catalogues/gregory1996_gb6.fits')
     pmn = Catalogues.PMN()
     pmn('AncillaryData/Catalogues/griffith1993_pmne.fits')
-    print(mingaliev.size,gb6.size,pmn.size)
+    pmnt = Catalogues.PMN()
+    pmnt('AncillaryData/Catalogues/griffith1993_pmnt.fits')
+
     mingaliev,gb6 = common_sources(mingaliev,gb6)
     pmn,gb6 = common_sources(pmn,gb6)
 
-    total_catalogue = mingaliev + gb6 + pmn
+    total_catalogue = mingaliev + gb6 + pmn + pmnt
     total_catalogue.clean_nan()
     merge_catalogues(cbass,total_catalogue, fwhm=1.)
     total_catalogue = total_catalogue + cbass
     total_catalogue.clean_nan()
+    total_catalogue.mask_map(mask_map)
 
     galmap = Mapper.pixel_space(total_catalogue.flux, total_catalogue.glon, total_catalogue.glat,nside=nside,
                     fwhm=fwhm)
@@ -137,20 +147,45 @@ def main():
 if __name__ == "__main__":
 
     #params = Parser.Parser(sys.argv[1])
-    main()
+    #main()
     
-    cbass = hp.read_map('AncillaryData/AWR1_xND12_xAS14_1024_NM20S3M1_G_Offmap_zerolevel_deconvolution_1024.fits')
+    cbass = hp.read_map('AncillaryData/AWR1_xND12_xAS14_1024_NM20S3M1_G_Offmap_deconvolution.fits')
 
     srcs  = hp.read_map('figures/galmap_test_with_cbass.fits')
-
+    mask_map = hp.read_map('../Masks/scripts/masks/CBASS_80pc_G_1024.fits')
+    mask_map[cbass == hp.UNSEEN] = hp.UNSEEN
     residual = cbass - srcs
     residual[cbass == hp.UNSEEN] = hp.UNSEEN
-
-    hp.mollview(residual,norm='hist')
-    hp.graticule()
-    pyplot.savefig('figures/with_cbass_residual.png')
+    residual[residual != hp.UNSEEN] *= 1e3 
+    cbass[cbass != hp.UNSEEN] *= 1e3
+    mollview = healpix_tools.Mollview()
+    mollview(cbass,vmin=-2e1, vmax=1e1)
+    mollview.add_colorbar(unit_label='mK')
+    mollview.add_grid()
+    mollview.contourf(mask_map,levels=[0.5,1],cmap=pyplot.get_cmap('Greys'))
+    pyplot.title('Original CBASS')
+    pyplot.savefig('figures/with_cbass_original.png')
+    #pyplot.show()
     pyplot.close()
 
+    mollview = healpix_tools.Mollview()
+    mollview(residual,vmin=-2e1, vmax=1e1)
+    mollview.add_colorbar(unit_label='mK')
+    mollview.add_grid()
+    mollview.contourf(mask_map,levels=[0.5,1],cmap=pyplot.get_cmap('Greys'))
+    pyplot.title('Source-subtracted CBASS')
+    pyplot.savefig('figures/with_cbass_residual.png')
+    #pyplot.show()
+    pyplot.close()
+
+    gnomview = healpix_tools.Gnomview(crval=[305.5,57.5])
+    gnomview(residual)
+    gnomview.add_colorbar(unit_label='K')
+    gnomview.add_grid() 
+    
+    pyplot.savefig('figures/with_cbass_residual_gnom.png')
+
+    sys.exit()
     gls,gbs = np.meshgrid(np.linspace(0,360,10),np.linspace(-90,90,9))
     gls = gls.flatten()
     gbs = gbs.flatten()
